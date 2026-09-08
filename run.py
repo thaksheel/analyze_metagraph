@@ -11,6 +11,7 @@ from bittensor.metagraph import Metagraph, MetagraphNeuron
 from bittensor import storage
 from bittensor import Subtensor
 
+# TODO: 1) use archive mode to fetch older blocks, 2) reduce runtime using asycn or query_batch, 3) organize and package all sn info
 
 class StorageFunctions(Enum): 
     """keys found in bittensor._generated.storage used in query_map functions"""
