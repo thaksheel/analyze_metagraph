@@ -5,21 +5,24 @@ import asyncio
 from enum import Enum
 import time
 from tqdm import tqdm
+from dataclasses import dataclass, field
+from typing import Any, List, Optional, Literal, Dict
 
 import bittensor
-from bittensor.metagraph import Metagraph, MetagraphNeuron
 from bittensor import storage
 from bittensor import Subtensor
 
 # TODO: 1) use archive mode to fetch older blocks, 2) reduce runtime using asycn or query_batch, 3) organize and package all sn info
 
-class StorageFunctions(Enum): 
+
+class StorageFunctions(Enum):
     """keys found in bittensor._generated.storage used in query_map functions"""
-    uids = "Uids"
+
+    # uids = "Uids" # do not need this 0-256 unless I need hotkeys
     dividends = "Dividends"
     last_update = "LastUpdate"
     active = "Active"
-    stake = "TotalStake"
+    # stake = "TotalStake" #TODO: find a way to collect stake, this throws an exception rn
     weight = "Weights"
     emission = "Emission"
     validator_permit = "ValidatorPermit"
@@ -36,7 +39,28 @@ class StorageFunctions(Enum):
     neuron_cert = "NeuronCertificates"
 
 
-async def main(sf: str, block_hash: int):
+class BlockSnapshot:
+    netuid: List[np.ndarray] = field(default_factory=list)
+    dividends: List[np.ndarray] = field(default_factory=list)
+    last_update: List[np.ndarray] = field(default_factory=list)
+    active: List[np.ndarray] = field(default_factory=list)
+    weight: List[np.ndarray] = field(default_factory=list)
+    emission: List[np.ndarray] = field(default_factory=list)
+    validator_permit: List[np.ndarray] = field(default_factory=list)
+    incentive: List[np.ndarray] = field(default_factory=list)
+    validator_trust: List[np.ndarray] = field(default_factory=list)
+    bonds: List[np.ndarray] = field(default_factory=list)
+    consensus: List[np.ndarray] = field(default_factory=list)
+    tempo: List[np.ndarray] = field(default_factory=list)
+    kappa: List[np.ndarray] = field(default_factory=list)
+    subnet_mechanism: List[np.ndarray] = field(default_factory=list)
+    rho: List[np.ndarray] = field(default_factory=list)
+    activity_cutoff: List[np.ndarray] = field(default_factory=list)
+    mechanism_count_current: List[np.ndarray] = field(default_factory=list)
+    neuron_cert: List[np.ndarray] = field(default_factory=list)
+
+
+async def main(sf: str, block_hash: int, block_snapshot: BlockSnapshot):
     client = bittensor.Client(network="finney")
     await client.connect()
     subs = client._substrate
@@ -45,12 +69,17 @@ async def main(sf: str, block_hash: int):
             module="SubtensorModule",
             storage_function=sf,
             block_hash=block_hash,
-            # params=[33],  # netuid, or uid
+            # param_sets=[[0]], # can be 0,1,2 
         )
+        block_snapshot.netuid = np.array([v[0] for v in value])
+        d = []
+        for val in value:
+            d.append(np.array(val[1]))
+        setattr(block_snapshot, sf, d)
     except:
         print(f"---> {sf} exception")
-        return None
-    return value
+        return None 
+    return block_snapshot
 
 
 sns = [
@@ -106,23 +135,40 @@ blocks = [
 b = blocks[10]
 durations = [time.time()]
 stm = storage.SubtensorModule()
-sub = Subtensor(network="finney")
+sub = Subtensor(
+    network="finney",
+    archive_endpoints=["wss://archive.chain.opentensor.ai:443"],
+)
 values = []
 errors = []
 worked = []
+block_data: List[Dict] = []
 for b in tqdm(blocks):
-    # b = sub.block_info(b).hash
-    b = None 
+    print()
+    bi = sub.block_info(b)
+    block_d = BlockSnapshot()
     for sf in StorageFunctions:
-        val = asyncio.run(main(sf=sf.value, block_hash=b))
-        if val is None:
+        block_d = asyncio.run(main(sf=sf.value, block_hash=bi.hash, block_snapshot=block_d))
+        if block_d is None:
             errors.append(sf)
-        else:
-            values.append(val)
-            worked.append(sf.value)
         durations.append(time.time())
-        print(f"fetch_time for {sf.value} ={durations[-1] - durations[-2]:.2f}s")
-    print(f"\n\nblock_num={b}")
+        print(f"fetch_time for {sf.value}= {durations[-1] - durations[-2]:.2f}s")
+    block_data.append(
+        {
+            "block_num": bi.number,
+            "block_timestamp": bi.timestamp,
+            "block_snapshot": block_d,
+        }
+    )
+    print(f"\n\nblock_num={bi.number}")
 
 print(f"Runtime={(time.time() - durations[0]):.2f}s for len_blocks={len(blocks)}")
 print("END")
+
+
+# NOTE: explore scripts
+active_sn10 = np.array(values[3][10][1])  # (fields, subnet number, select data)
+active_sn10_uids = np.where(active_sn10 == True)
+
+div = np.array(values[1][10][1])
+div_active_sn10 = div[active_sn10_uids]
