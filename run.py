@@ -40,24 +40,24 @@ class StorageFunctions(Enum):
 
 
 class BlockSnapshot:
-    netuid: List[np.ndarray] = field(default_factory=list)
-    dividends: List[np.ndarray] = field(default_factory=list)
-    last_update: List[np.ndarray] = field(default_factory=list)
-    active: List[np.ndarray] = field(default_factory=list)
-    weight: List[np.ndarray] = field(default_factory=list)
-    emission: List[np.ndarray] = field(default_factory=list)
-    validator_permit: List[np.ndarray] = field(default_factory=list)
-    incentive: List[np.ndarray] = field(default_factory=list)
-    validator_trust: List[np.ndarray] = field(default_factory=list)
-    bonds: List[np.ndarray] = field(default_factory=list)
-    consensus: List[np.ndarray] = field(default_factory=list)
-    tempo: List[np.ndarray] = field(default_factory=list)
-    kappa: List[np.ndarray] = field(default_factory=list)
-    subnet_mechanism: List[np.ndarray] = field(default_factory=list)
-    rho: List[np.ndarray] = field(default_factory=list)
-    activity_cutoff: List[np.ndarray] = field(default_factory=list)
-    mechanism_count_current: List[np.ndarray] = field(default_factory=list)
-    neuron_cert: List[np.ndarray] = field(default_factory=list)
+    netuid: Any = []
+    dividends: Any = []
+    last_update: Any = []
+    active: Any = []
+    weight: Any = []
+    emission: Any = []
+    validator_permit: Any = []
+    incentive: Any = []
+    validator_trust: Any = []
+    bonds: Any = []
+    consensus: Any = []
+    tempo: Any = []
+    kappa: Any = []
+    subnet_mechanism: Any = []
+    rho: Any = []
+    activity_cutoff: Any = []
+    mechanism_count_current: Any = []
+    neuron_cert: Any = []
 
 
 async def main(sf: str, block_hash: int, block_snapshot: BlockSnapshot):
@@ -75,7 +75,7 @@ async def main(sf: str, block_hash: int, block_snapshot: BlockSnapshot):
         d = []
         for val in value:
             d.append(np.array(val[1]))
-        setattr(block_snapshot, sf, d)
+        setattr(block_snapshot, sf.lower(), d)
     except:
         print(f"---> {sf} exception")
         return None 
