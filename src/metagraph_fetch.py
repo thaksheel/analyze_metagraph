@@ -6,14 +6,66 @@ from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional, Literal
 from matplotlib import pyplot as plt
 import bittensor
+from datetime import datetime
 from bittensor.metagraph import Metagraph, MetagraphNeuron
 from bittensor import Substrate
 from bittensor import Subtensor
 
-from .utils import BlockSnapshot
+from .utils import BlockSnapshot, BlockInfo
 
 duration = [time.time()]
 
+
+class MetagraphManager:
+    def __init__(self, display:bool=False):
+        self.display = display
+
+    def block_collection(
+        self,
+        block_amount: int,
+        current_block: int,
+        duration_month: int,
+    ):
+        # NOTE: 12s/block
+        blocks_per_amount = int(duration_month * (30 * 24 * 3600) / 12 / block_amount)
+        blocks = [
+            current_block - i * blocks_per_amount for i in range(block_amount, -1, -1)
+        ]
+        return blocks
+
+    def cache_block_info(
+        self,
+        sub: Subtensor,
+        block_amount: int,
+        current_block: int,
+        duration_month: int,
+        save_path: str,
+    ):
+        blocks = self.block_collection(block_amount, current_block, duration_month)
+        bis = [sub.block_info(b).__dict__ for b in blocks]
+        bis = []
+        for b in blocks:
+            bi = sub.block_info(b).__dict__
+            bi['timestamp'] = bi['timestamp'].isoformat()
+            bis.append(bi)
+        with open(save_path, "w") as f: 
+            json.dump(bis, f)
+        return bis 
+
+    def load_cache_block_info(self, bi_path: str) -> List[BlockInfo]: 
+        """Collects only the hash, number, and timestamps as `BlockInfo` fields while ignoring the rest."""
+        with open(bi_path, "r") as f:
+            data = json.load(f)
+        blocks = []
+        for entry in data:
+            blocks.append(
+                BlockInfo(
+                    number=entry["number"],
+                    hash=entry["hash"],
+                    timestamp=datetime.fromisoformat(entry["timestamp"])
+                )
+            )
+        return blocks 
 
 
 def load_snapshot_at_block(m: Metagraph, sub: Subtensor, hparams: float, block: int):
@@ -146,4 +198,3 @@ def snapshot_to_df(snapshots: List[BlockSnapshot]):
             }
         )
     return pd.DataFrame(records)
-
