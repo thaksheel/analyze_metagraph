@@ -1,5 +1,3 @@
-import numpy as np
-import pandas as pd
 import asyncio
 import time
 from bittensor import Subtensor
@@ -21,9 +19,8 @@ blocksnapshots = asyncio.run(
         netuids=netuids[:5],
     )
 )
-mm.cache_blocksnapshots(blocksnapshots, outpath="./exports/bss.json")
-bss = mm.load_blocksnapshots(inpath="./exports/bss.json")
+mm.cache_blocksnapshots(blocksnapshots, outpath="./exports/bss0.json")
+bss = mm.load_blocksnapshots(inpath="./exports/bss0.json")
 
-print(f"Runtime={(time.time() - durations[0]):.2f}s for len_blocks={len(bis)}")
 print(len(blocksnapshots))
 print("END")

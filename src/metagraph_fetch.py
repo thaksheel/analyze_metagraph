@@ -55,6 +55,8 @@ class MetagraphManager:
                 return obj.tolist()
             if isinstance(obj, list):
                 return [convert(v) for v in obj]
+            if isinstance(obj, datetime):
+                return obj.isoformat()
             if hasattr(obj, "__dict__"):
                 return {k: convert(v) for k, v in obj.__dict__.items()}
             return obj
@@ -155,7 +157,7 @@ class MetagraphManager:
                         "fetch data from query batch is not working. See `fetch_by_netuids`"
                     )
                 data = [np.array(d) for d in data]
-                setattr(snap, sf.value.lower(), data)
+                setattr(snap, sf.value, data)
             blocksnapshots.append(snap)
         return blocksnapshots
 
