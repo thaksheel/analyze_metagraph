@@ -2,19 +2,15 @@ import numpy as np
 import pandas as pd
 import json
 import time
-from dataclasses import dataclass
+from tqdm import tqdm
 from typing import List, Dict, Tuple, Optional, Literal
-from matplotlib import pyplot as plt
-import bittensor
 from datetime import datetime
 import asyncio
-from bittensor.metagraph import Metagraph, MetagraphNeuron
-from bittensor import Substrate
+import bittensor
+from bittensor.metagraph import Metagraph
 from bittensor import Subtensor
 
 from .utils import BlockSnapshot, BlockInfo, StorageFunctions
-
-duration = [time.time()]
 
 
 class MetagraphManager:
@@ -51,7 +47,55 @@ class MetagraphManager:
             bis.append(bi)
         with open(save_path, "w") as f:
             json.dump(bis, f)
-        return bis
+        return bis 
+
+    def cache_blocksnapshots(self, snapshots: List[BlockSnapshot], outpath:str):
+        def convert(obj):
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, list):
+                return [convert(v) for v in obj]
+            if hasattr(obj, "__dict__"):
+                return {k: convert(v) for k, v in obj.__dict__.items()}
+            return obj
+        data = [convert(s) for s in snapshots]
+        with open(outpath, "w") as f:
+            json.dump(data, f)
+        return self 
+
+    def load_blocksnapshots(self, inpath: str): 
+        def to_array_list(x):
+            return [np.array(v) for v in x]
+
+        with open(inpath, "r") as f:
+            raw = json.load(f)
+        snapshots = []
+        for entry in raw:
+            bi_dict = entry["block_info"]
+            block_info = BlockInfo(**bi_dict)            
+            snapshot = BlockSnapshot(
+                block_info=block_info,
+                netuid=entry["netuid"],
+                Active=to_array_list(entry["Active"]),
+                ActivityCutoff=to_array_list(entry["ActivityCutoff"]),
+                Bonds=to_array_list(entry["Bonds"]),
+                Consensus=to_array_list(entry["Consensus"]),
+                Dividends=to_array_list(entry["Dividends"]),
+                Emission=to_array_list(entry["Emission"]),
+                Incentive=to_array_list(entry["Incentive"]),
+                Kappa=to_array_list(entry["Kappa"]),
+                LastUpdate=to_array_list(entry["LastUpdate"]),
+                MechanismCountCurrent=to_array_list(entry["MechanismCountCurrent"]),
+                NeuronCertificates=to_array_list(entry["NeuronCertificates"]),
+                Rho=to_array_list(entry["Rho"]),
+                SubnetMechanism=to_array_list(entry["SubnetMechanism"]),
+                Tempo=to_array_list(entry["Tempo"]),
+                ValidatorPermit=to_array_list(entry["ValidatorPermit"]),
+                ValidatorTrust=to_array_list(entry["ValidatorTrust"]),
+                Weights=to_array_list(entry["Weights"]),
+            )
+            snapshots.append(snapshot)
+        return snapshots 
 
     def load_cache_block_info(self, bi_path: str) -> List[BlockInfo]:
         """Collects only the hash, number, and timestamps as `BlockInfo` fields while ignoring the rest."""
@@ -75,8 +119,8 @@ class MetagraphManager:
         cutoff: int = 50,
     ) -> List[int]:
         sf = StorageFunctions[metric].value
-        netuids, data = asyncio.run(self.fetch_blocksnapshot(sf, block_hash))
-        data = np.array([d.sum() for d in data])
+        netuids, d = asyncio.run(self.fetch_all_netuids(sf, block_hash))
+        data = np.array([d.sum() for d in d])
         scored = []
         for netuid in netuids:
             values = np.array(data[netuid])
@@ -87,9 +131,54 @@ class MetagraphManager:
             scored.append((netuid, score))
         scored.sort(key=lambda x: x[1], reverse=True)
         sorted_netuids = [int(n) for n, _ in scored]
-        return sorted_netuids[:cutoff]
+        return sorted_netuids[:cutoff], d
 
-    async def fetch_blocksnapshot(self, storage_func: str, block_hash: str):
+    async def collect_blocksnapshots(
+        self, block_info: List[BlockInfo], netuids: List[int]
+    ):
+        client = bittensor.Client(network="finney")
+        await client.connect()
+        subs = client._substrate
+        blocksnapshots: List[BlockSnapshot] = []
+        netuids_lst = [[i] for i in netuids]
+        for bi in tqdm(block_info):
+            snap = BlockSnapshot(block_info=bi, netuid=netuids)
+            for sf in StorageFunctions:
+                data = await self.fetch_by_netuids(
+                    storage_func=sf.value,
+                    block_hash=bi.hash,
+                    netuids_params=netuids_lst,
+                    substrate=subs,
+                )
+                if data is None:
+                    raise ValueError(
+                        "fetch data from query batch is not working. See `fetch_by_netuids`"
+                    )
+                data = [np.array(d) for d in data]
+                setattr(snap, sf.value.lower(), data)
+            blocksnapshots.append(snap)
+        return blocksnapshots
+
+    async def fetch_by_netuids(
+        self,
+        storage_func: str,
+        block_hash: str,
+        netuids_params: List[List[str]],
+        substrate: bittensor.Substrate,
+    ):
+        try:
+            data = await substrate.query_batch(
+                module="SubtensorModule",
+                storage_function=storage_func,
+                block_hash=block_hash,
+                param_sets=netuids_params,
+            )
+            return data
+        except:
+            print(f"--->Error in collecting {storage_func} data. Review this!!!")
+            return None
+
+    async def fetch_all_netuids(self, storage_func: str, block_hash: str):
         client = bittensor.Client(network="finney")
         await client.connect()
         subs = client._substrate
@@ -98,7 +187,6 @@ class MetagraphManager:
                 module="SubtensorModule",
                 storage_function=storage_func,
                 block_hash=block_hash,
-                # param_sets=[[0]], # can be 0,1,2
             )
             netuids = np.array([v[0] for v in value])
             data = [np.array(val[1]) for val in value]
@@ -107,134 +195,3 @@ class MetagraphManager:
             return None
         return netuids, data
 
-
-def load_snapshot_at_block(m: Metagraph, sub: Subtensor, hparams: float, block: int):
-    m.sync(subtensor=sub, block=block)
-    sd = m.state_dict()
-    return BlockSnapshot(
-        netuid=sd["netuid"],
-        block_num=block,
-        consensus=sd["consensus"],
-        validator_trust=sd["validator_trust"],
-        incentive=sd["incentive"],
-        dividends=sd["dividends"],
-        emissions=sd["emission"],
-        active=sd["active"],
-        weights=sd["weights"],
-        bonds=sd["bonds"],
-        validator_permit=sd["validator_permit"],
-        uids=sd["uids"],
-        neurons=sd["neurons"],
-        alpha_stake=sd["alpha_stake"],
-        stake=sd["stake"],
-        tao_stake=sd["tao_stake"],
-        timestamp=sub.get_block_info(block).timestamp,
-        mechanism_count=m.mechanism_count,
-        mechanism_id=m.mechid,
-        last_update=sd["last_update"],
-        hparams=hparams,
-    )
-
-
-def to_json(snapshots: List[BlockSnapshot], filename: str, path: str):
-    data = []
-    snapshots = [snap.__dict__ for snap in snapshots]
-    keys = list(snapshots[-1].keys())
-    for snap in snapshots:
-        d = dict(zip(keys, [None for _ in keys]))
-        for key in keys:
-            if key == "hparams":
-                d[key] = snap[key].__dict__
-                continue
-            elif key == "neurons":
-                continue
-            d[key] = (
-                snap[key].tolist() if isinstance(snap[key], np.ndarray) else snap[key]
-            )
-        data.append(d)
-    with open(path + filename, "w") as f:
-        json.dump(data, f, indent=4)
-        print("exported", len(data), len(data[0]["active"]))
-    return data
-
-
-def block_collection(
-    block_amount: int,
-    current_block: int,
-    duration_month: int,
-):
-    # NOTE: 12s/block
-    blocks_per_amount = int(duration_month * (30 * 24 * 3600) / 12 / block_amount)
-    blocks = [
-        current_block - i * blocks_per_amount for i in range(block_amount, -1, -1)
-    ]
-    return blocks
-
-
-def get_metagraph(
-    netuid: int, block_amount: int, duration_month: int, display: bool = False
-):
-    m = Metagraph(
-        netuid=netuid,
-        network="finney",
-        lite=False,
-        sync=True,
-    )
-    subtensor = Subtensor("archive")
-    blocks = block_collection(
-        block_amount=block_amount,
-        current_block=subtensor.block,
-        duration_month=duration_month,
-    )
-    snapshots: List[BlockSnapshot] = []
-    for i, block in enumerate(blocks):
-        if display:
-            if i % 10 == 0 and i > 0:
-                active = snapshots[-1].active
-                duration.append(time.time())
-                dur = time.time() - duration[-1]
-                print(
-                    f"progress={round(100*i/len(blocks),2)}% block_count={i}, miner_count={active.sum()}, duration={round(dur/60,2)}mins"
-                )
-        snapshots.append(
-            load_snapshot_at_block(m=m, sub=subtensor, block=block, hparams=None)
-        )
-    if display:
-        keys = [
-            "emissions",
-            "dividends",
-            "active",
-            "weights",
-            "stake",
-            "incentive",
-            "validator_trust",
-            "uids",
-        ]
-        for key in keys:
-            d = snapshots[0].__dict__[key][snapshots[0].__dict__["active"] == 1]
-            print(key, d.shape, d.sum())
-            print(d)
-            print()
-    return snapshots
-
-
-def snapshot_to_df(snapshots: List[BlockSnapshot]):
-    records = []
-    for snap in snapshots:
-        active_count = snap.active.sum()
-        active_mask = snap.active == 1
-        records.append(
-            {
-                "block": snap.block_num,
-                "active_count": active_count,
-                "total_incentive": snap.incentive[active_mask].sum(),
-                "total_emissions": snap.emissions[active_mask].sum(),
-                "total_dividends": snap.dividends[active_mask].sum(),
-                "total_weights": snap.weights[active_mask].sum(),
-                "total_val_trust": snap.validator_trust[active_mask].sum(),
-                "sum_active_uids": snap.uids[active_mask].sum(),
-                "total_vals_stake(mil)": snap.tao_stake.sum() / 1e6,
-                "timestamp": pd.to_datetime(snap.timestamp, unit="ms"),
-            }
-        )
-    return pd.DataFrame(records)
