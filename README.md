@@ -1,60 +1,74 @@
 # Bittensor Metagraph Information Collector
 
-A tool for collecting and analyzing metagraph information from the Bittensor network across different subnets and block heights.
+This project collects metagraph information from the Bittensor network for subnet-level analysis across different block ages and network conditions. The goal is to gather structured data points from multiple subnets so that subnet behavior can be studied at both the individual and aggregate level.
 
 ## Overview
 
-This project collects specific datapoints from Bittensor subnets at different block ages to enable analysis of subnet behaviors and network dynamics over time. The goal is to extract metagraph data in a structured format suitable for data analysis and behavioral insights.
+The repository is designed to collect metagraph and subnet state information from Bittensor and store it in a format that is easy to analyze with Python-based scientific and statistical workflows. The main workflow now relies on the `MetagraphManager` class in `src/metagraph_fetch.py`, which provides the core functionality for retrieving block information, selecting subnets by metric, and collecting metagraph snapshots at specific blocks.
 
 ## Current Status
 
-⚠️ **Work in Progress** — `run.py` is currently in active development and testing phase. The core functionality works, but the code is not yet packaged into a reusable class for broader use.
+Most of the main implementation issues have been resolved, and the project is now using the `MetagraphManager` workflow to collect the information needed for analysis. The code is no longer limited to a single exploratory script; it is structured around a reusable class for data collection and caching.
 
-### Dataset Fields
+The remaining work is focused on scaling the collection process and stabilizing edge cases around network requests and large data retrieval.
 
-A dataset class has been outlined with specific fields to capture from the Bittensor metagraph. These fields are currently being tested against the `query_map` function to ensure reliable data collection.
+## Recommended Workflow
 
-## Active Issues Being Resolved 
+For someone replicating this repo, the intended process is:
 
-1. **Archive Mode for Older Blocks**
-   - Need to implement archive mode queries to fetch historical blockchain data
-   - Currently exploring Bittensor's archive capabilities
+1. Run `run_cache.py` first to collect the block information needed for the analysis.
+2. Run `run.py` to collect metagraph data for a selected set of netuids.
+3. Use the exported cache and snapshot files in `exports/` for downstream analysis.
 
-2. **Batch Processing for Large-Scale Data Collection**
-   - Fetching large numbers of blocks currently requires 100+ hours of sequential queries
-   - Working on implementing efficient batch processing to significantly reduce runtime
-   - Investigating async patterns and query optimization
+This sequence ensures that block metadata is available before metagraph snapshots are gathered for a given set of network conditions.
 
-3. **Data Packaging and Array Organization**
-   - Developing a consolidated nd-array structure for efficient data storage and analysis
-   - Ensuring data is organized for easy consumption in data analysis workflows
+## Data Collection Targets
+
+The long-term objective is to collect a large set of subnet observations over time, including:
+
+- multiple subnets
+- different block ages
+- repeated snapshots across time windows
+- aggregated metrics across many subnet states
+
+The immediate analytic goal is to collect approximately 500 blocks of data for a specific subset of netuids, with at least 30 subnets included in the collection set. This is intended to support modeling subnet behavior at an aggregate level and analyzing how different subnet conditions evolve over time.
+
+## Dataset and Field Scope
+
+A dataset structure has been defined to capture the needed metagraph fields, and the project is using those fields in the collection flow. Some of the field mappings are still being validated against the underlying `query_map` calls, but the general framework is in place and the collection pipeline is working.
+
+The broader objective is to organize the final output into a concise array-based dataset or structured tabular representation for efficient analysis and modeling.
+
 
 ## Project Structure
 
 ```
-├── run.py              # Main data collection script (WIP)
+├── run.py              # Main metagraph collection workflow
+├── run_cache.py        # Block metadata collection workflow
 ├── src/
-│   ├── metagraph_fetch.py
-│   └── utils.py
-├── exports/            # Output data directory
-└── temp/               # Temporary files
+│   ├── metagraph_fetch.py   # MetagraphManager implementation
+│   └── utils.py            # Utility helpers
+├── exports/            # Cached block and snapshot data
+├── temp/               # Temporary working files
+├── README.md           # Project overview and workflow notes
+└── ...
 ```
 
 ## Goals
 
-- Collect granular subnet-specific datapoints across different time periods
-- Enable behavioral analysis of subnets through metagraph metrics
-- Create efficient pipelines for large-scale blockchain data collection
-- Package results in formats suitable for statistical and machine learning analysis
+- Collect subnet-specific datapoints across multiple block windows
+- Study aggregate behavior across many subnets over time
+- Build a scalable dataset for behavior analysis and modeling
+- Package the resulting information into a concise, analysis-ready data structure
 
 ## Next Steps
 
-1. Finalize and validate all dataset fields via `query_map`
-2. Implement archive mode support for historical data
-3. Develop batch processing pipeline with async optimization
-4. Refactor into a production-ready class structure
-5. Create comprehensive data export formats
+1. Continue validating the metagraph field set used in the collection pipeline
+2. Expand the batch collection workflow for larger runs
+3. Collect 500 blocks of data for a focused subnet set, aiming for at least 30 subnets
+4. Improve handling of RPC request limits and failure recovery
+5. Package the final dataset into a stable structure for downstream modeling and analysis
 
 ## Notes
 
-Once the code stabilizes and the core issues are resolved, this will be refactored into a proper, reusable class that can be easily integrated into other projects or used directly for data collection workflows.
+This project is still evolving, but the core collection workflow is now in place. The current emphasis is on scaling the data collection process, improving historical block retrieval, and producing a consistent dataset suitable for subnet behavior analysis.
