@@ -7,17 +7,18 @@ from typing import List, Dict, Tuple, Optional, Literal
 from matplotlib import pyplot as plt
 import bittensor
 from datetime import datetime
+import asyncio
 from bittensor.metagraph import Metagraph, MetagraphNeuron
 from bittensor import Substrate
 from bittensor import Subtensor
 
-from .utils import BlockSnapshot, BlockInfo
+from .utils import BlockSnapshot, BlockInfo, StorageFunctions
 
 duration = [time.time()]
 
 
 class MetagraphManager:
-    def __init__(self, display:bool=False):
+    def __init__(self, display: bool = False):
         self.display = display
 
     def block_collection(
@@ -46,13 +47,13 @@ class MetagraphManager:
         bis = []
         for b in blocks:
             bi = sub.block_info(b).__dict__
-            bi['timestamp'] = bi['timestamp'].isoformat()
+            bi["timestamp"] = bi["timestamp"].isoformat()
             bis.append(bi)
-        with open(save_path, "w") as f: 
+        with open(save_path, "w") as f:
             json.dump(bis, f)
-        return bis 
+        return bis
 
-    def load_cache_block_info(self, bi_path: str) -> List[BlockInfo]: 
+    def load_cache_block_info(self, bi_path: str) -> List[BlockInfo]:
         """Collects only the hash, number, and timestamps as `BlockInfo` fields while ignoring the rest."""
         with open(bi_path, "r") as f:
             data = json.load(f)
@@ -62,10 +63,49 @@ class MetagraphManager:
                 BlockInfo(
                     number=entry["number"],
                     hash=entry["hash"],
-                    timestamp=datetime.fromisoformat(entry["timestamp"])
+                    timestamp=datetime.fromisoformat(entry["timestamp"]),
                 )
             )
-        return blocks 
+        return blocks
+
+    def get_subnets_by(
+        self,
+        metric: Literal["dividends", "emission", "active"],
+        block_hash: str,
+        cutoff: int = 50,
+    ) -> List[int]:
+        sf = StorageFunctions[metric].value
+        netuids, data = asyncio.run(self.fetch_blocksnapshot(sf, block_hash))
+        data = np.array([d.sum() for d in data])
+        scored = []
+        for netuid in netuids:
+            values = np.array(data[netuid])
+            if values.size == 0:
+                score = -np.inf
+            else:
+                score = float(values.mean())
+            scored.append((netuid, score))
+        scored.sort(key=lambda x: x[1], reverse=True)
+        sorted_netuids = [int(n) for n, _ in scored]
+        return sorted_netuids[:cutoff]
+
+    async def fetch_blocksnapshot(self, storage_func: str, block_hash: str):
+        client = bittensor.Client(network="finney")
+        await client.connect()
+        subs = client._substrate
+        try:
+            value = await subs.query_map(
+                module="SubtensorModule",
+                storage_function=storage_func,
+                block_hash=block_hash,
+                # param_sets=[[0]], # can be 0,1,2
+            )
+            netuids = np.array([v[0] for v in value])
+            data = [np.array(val[1]) for val in value]
+        except:
+            print(f"---> {storage_func} exception")
+            return None
+        return netuids, data
 
 
 def load_snapshot_at_block(m: Metagraph, sub: Subtensor, hparams: float, block: int):
