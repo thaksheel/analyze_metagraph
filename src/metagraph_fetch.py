@@ -1,14 +1,14 @@
 import numpy as np
-import pandas as pd
 import json
-import time
 from tqdm import tqdm
 from typing import List, Dict, Tuple, Optional, Literal
 from datetime import datetime
+import pickle
 import asyncio
 import bittensor
-from bittensor.metagraph import Metagraph
 from bittensor import Subtensor
+from bittensor.result import RpcPolicyError
+from bittensor._transport.errors import StateDiscardedError
 
 from .utils import BlockSnapshot, BlockInfo, StorageFunctions
 
@@ -47,9 +47,9 @@ class MetagraphManager:
             bis.append(bi)
         with open(save_path, "w") as f:
             json.dump(bis, f)
-        return bis 
+        return bis
 
-    def cache_blocksnapshots(self, snapshots: List[BlockSnapshot], outpath:str):
+    def cache_blocksnapshots(self, snapshots: List[BlockSnapshot], outpath: str):
         def convert(obj):
             if isinstance(obj, np.ndarray):
                 return obj.tolist()
@@ -60,12 +60,13 @@ class MetagraphManager:
             if hasattr(obj, "__dict__"):
                 return {k: convert(v) for k, v in obj.__dict__.items()}
             return obj
+
         data = [convert(s) for s in snapshots]
         with open(outpath, "w") as f:
             json.dump(data, f)
-        return self 
+        return self
 
-    def load_blocksnapshots(self, inpath: str): 
+    def load_blocksnapshots(self, inpath: str):
         def to_array_list(x):
             return [np.array(v) for v in x]
 
@@ -74,7 +75,7 @@ class MetagraphManager:
         snapshots = []
         for entry in raw:
             bi_dict = entry["block_info"]
-            block_info = BlockInfo(**bi_dict)            
+            block_info = BlockInfo(**bi_dict)
             snapshot = BlockSnapshot(
                 block_info=block_info,
                 netuid=entry["netuid"],
@@ -97,7 +98,7 @@ class MetagraphManager:
                 Weights=to_array_list(entry["Weights"]),
             )
             snapshots.append(snapshot)
-        return snapshots 
+        return snapshots
 
     def load_cache_block_info(self, bi_path: str) -> List[BlockInfo]:
         """Collects only the hash, number, and timestamps as `BlockInfo` fields while ignoring the rest."""
@@ -138,6 +139,7 @@ class MetagraphManager:
     async def collect_blocksnapshots(
         self, block_info: List[BlockInfo], netuids: List[int]
     ):
+        """Standard implementation without retry loops."""
         client = bittensor.Client(network="finney")
         await client.connect()
         subs = client._substrate
@@ -145,6 +147,9 @@ class MetagraphManager:
         netuids_lst = [[i] for i in netuids]
         for bi in tqdm(block_info):
             snap = BlockSnapshot(block_info=bi, netuid=netuids)
+            if len(blocksnapshots) > 0:
+                await asyncio.sleep(60)
+                print("sleeping for 60s")
             for sf in StorageFunctions:
                 data = await self.fetch_by_netuids(
                     storage_func=sf.value,
@@ -159,6 +164,66 @@ class MetagraphManager:
                 data = [np.array(d) for d in data]
                 setattr(snap, sf.value, data)
             blocksnapshots.append(snap)
+        return blocksnapshots
+
+    async def historical_retry(
+        self, coro_factory, initial_wait: int = 60, max_wait: int = 1800
+    ):
+        attempt = 0
+        while True:
+            try:
+                return await coro_factory()
+            except RpcPolicyError as e:
+                wait_time = min(initial_wait * (2**attempt), max_wait)
+                jitter = np.random.uniform(0.8, 1.2)
+                actual_wait = wait_time * jitter
+                if self.display:
+                    print(
+                        f"[RATE LIMIT] Attempt={attempt} "
+                        f"sleeping {actual_wait:.1f}s "
+                    )
+                await asyncio.sleep(actual_wait)
+                attempt += 1
+            except StateDiscardedError:
+                raise RuntimeError(
+                    "Block state is unavailble on this node. "
+                    "Use a different archieve node. "
+                )
+
+    async def collect_blocksnapshots_with_retry(
+        self, block_info: List[BlockInfo], netuids: List[int], checkpoint: bool, outpath: str, 
+    ):
+        """Collects blocksnapshot with retry and checkpoint. """
+        client = bittensor.Client(network="finney")
+        await client.connect()
+        subs = client._substrate
+        rng = np.random.random_integers(100, 200)
+        blocksnapshots: List[BlockSnapshot] = []
+        netuids_lst = [[i] for i in netuids]
+        for bi in tqdm(block_info):
+            snap = BlockSnapshot(block_info=bi, netuid=netuids)
+            if len(blocksnapshots) > 0:
+                await asyncio.sleep(60)
+                print("sleeping for 60s")
+            for sf in StorageFunctions:
+                data = await self.historical_retry(
+                    lambda: self.fetch_by_netuids(
+                        storage_func=sf.value,
+                        block_hash=bi.hash,
+                        netuids_params=netuids_lst,
+                        substrate=subs,
+                    )
+                )
+                if data is None:
+                    raise ValueError(
+                        "fetch data from query batch is not working. See `fetch_by_netuids`"
+                    )
+                data = [np.array(d) for d in data]
+                setattr(snap, sf.value, data)
+            blocksnapshots.append(snap) 
+            if checkpoint:
+                outname = f"{outpath}checkpoint_{rng}_{len(blocksnapshots)}.json"
+                self.cache_blocksnapshots(blocksnapshots, outpath=outname)
         return blocksnapshots
 
     async def fetch_by_netuids(
@@ -196,4 +261,3 @@ class MetagraphManager:
             print(f"---> {storage_func} exception")
             return None
         return netuids, data
-

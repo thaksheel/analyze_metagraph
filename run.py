@@ -12,10 +12,14 @@ sub = Subtensor(
 )
 bis = mm.load_cache_block_info(bi_path="./exports/block_infos.json")
 current_bh = sub.block_info().hash
-netuids, data = mm.get_subnets_by(metric="emission", block_hash=current_bh, cutoff=30)
+netuids, data = mm.get_subnets_by(
+    metric="emission",
+    block_hash=current_bh,
+    cutoff=30,
+)
 blocksnapshots = asyncio.run(
     mm.collect_blocksnapshots(
-        block_info=bis[::-1][:5],  # NOTE: RCP exception for older blocks
+        block_info=bis[:10],  # NOTE: RCP exception for older blocks
         netuids=netuids[:5],
     )
 )
