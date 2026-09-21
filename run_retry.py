@@ -5,7 +5,7 @@ from bittensor import Subtensor
 from src.metagraph_fetch import MetagraphManager
 
 durations = [time.time()]
-mm = MetagraphManager(display=True)
+mm = MetagraphManager(display=False)
 sub = Subtensor(
     network="finney",
     archive_endpoints=["wss://archive.chain.opentensor.ai:443"],

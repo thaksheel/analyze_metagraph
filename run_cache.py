@@ -13,9 +13,9 @@ sub = Subtensor(
 current_block = sub.block_info().number
 bis = mm.cache_block_info(
     sub,
-    block_amount=100,
+    block_amount=500,
     current_block=current_block,
     duration_month=2,
-    save_path="./exports/block_infos.json",
+    save_path="./exports/block_infos500.json",
 )
 
