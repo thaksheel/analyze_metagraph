@@ -15,7 +15,7 @@ current_bh = sub.block_info().hash
 netuids, data = mm.get_subnets_by(
     metric="emission",
     block_hash=current_bh,
-    cutoff=30,
+    cutoff=60,
 )
 blocksnapshots = asyncio.run(
     mm.collect_blocksnapshots_with_retry(

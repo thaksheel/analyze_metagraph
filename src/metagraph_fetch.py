@@ -3,12 +3,10 @@ import json
 from tqdm import tqdm
 from typing import List, Dict, Tuple, Optional, Literal
 from datetime import datetime
-import pickle
 import asyncio
 import bittensor
 from bittensor import Subtensor
 from bittensor.result import RpcPolicyError
-from bittensor._transport.errors import StateDiscardedError
 
 from .utils import BlockSnapshot, BlockInfo, StorageFunctions
 
@@ -39,10 +37,34 @@ class MetagraphManager:
         save_path: str,
     ):
         blocks = self.block_collection(block_amount, current_block, duration_month)
-        bis = [sub.block_info(b).__dict__ for b in blocks]
         bis = []
         for b in blocks:
             bi = sub.block_info(b).__dict__
+            bi["timestamp"] = bi["timestamp"].isoformat()
+            bis.append(bi)
+        with open(save_path, "w") as f:
+            json.dump(bis, f)
+        return bis
+
+    async def cache_block_info_with_retry(
+        self,
+        sub: Subtensor,
+        block_amount: int,
+        current_block: int,
+        duration_month: int,
+        save_path: str,
+        max_wait: int = 1800, 
+        initial_wait:int = 60,
+    ):
+        blocks = self.block_collection(block_amount, current_block, duration_month)
+        bis = []
+        for b in tqdm(blocks):
+            bi = await self.historical_retry(
+                lambda: sub.block_info(b),
+                max_wait=max_wait,
+                initial_wait=initial_wait,
+            )
+            bi = bi.__dict__
             bi["timestamp"] = bi["timestamp"].isoformat()
             bis.append(bi)
         with open(save_path, "w") as f:
