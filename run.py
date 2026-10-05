@@ -2,7 +2,7 @@ import asyncio
 import time
 from bittensor import Subtensor
 
-from src.metagraph_fetch import MetagraphManager
+from src import MetagraphManager
 
 durations = [time.time()]
 mm = MetagraphManager()

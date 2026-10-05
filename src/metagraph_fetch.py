@@ -8,7 +8,7 @@ import bittensor
 from bittensor import Subtensor
 from bittensor.result import RpcPolicyError
 
-from .utils import BlockSnapshot, BlockInfo, StorageFunctions
+from . import BlockSnapshot, BlockInfo, StorageFunctions
 
 
 class MetagraphManager:
@@ -38,7 +38,7 @@ class MetagraphManager:
     ):
         blocks = self.block_collection(block_amount, current_block, duration_month)
         bis = []
-        for b in blocks:
+        for b in tqdm(blocks):
             bi = sub.block_info(b).__dict__
             bi["timestamp"] = bi["timestamp"].isoformat()
             bis.append(bi)
