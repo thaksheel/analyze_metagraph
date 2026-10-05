@@ -3,7 +3,7 @@
 from bittensor import Subtensor
 import asyncio
 
-from src import MetagraphManager
+from src.metagraph_fetch import MetagraphManager
 
 mm = MetagraphManager(display=True)
 sub = Subtensor(
@@ -21,7 +21,7 @@ bis = mm.cache_block_info(
         save_path="./exports/block_infos500_4.json",
     )
 
-# TODO: this is not working and goes into an infinit loop 
+# TODO: this is not working and goes into an infinit loop
 # bis = asyncio.run(
 #     mm.cache_block_info_with_retry(
 #         sub,

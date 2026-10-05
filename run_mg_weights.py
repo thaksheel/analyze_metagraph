@@ -2,7 +2,8 @@ import asyncio
 import time
 from bittensor import Subtensor
 
-from src import MetagraphManager, StorageFunctions
+from src import StorageFunctions
+from src.metagraph_fetch import MetagraphManager
 
 mm = MetagraphManager()
 sub = Subtensor(
