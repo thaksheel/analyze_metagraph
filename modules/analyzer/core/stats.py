@@ -1,4 +1,4 @@
-"""Small, dependency-light statistical helpers."""
+"""Statistical helpers: concentration, rank correlation, change points, AUC, graph components."""
 from typing import List, Tuple
 
 import numpy as np

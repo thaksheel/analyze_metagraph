@@ -16,6 +16,7 @@ collected 500 blocks in 2 hours), using full storage keys:
 Items are grouped so you switch groups on or off, and each item can be fetched every
 N-th block only (`every`), which is how slow, slowly-changing items like Axons stay cheap.
 """
+
 import glob
 import gzip
 import ipaddress
@@ -33,13 +34,13 @@ MECHANISM_STRIDE = 4096
 
 @dataclass(frozen=True)
 class Item:
-    name: str                 # storage function
-    kind: str                 # subnet | mechanism | uid | validator | hotkey | hotkey_net | account | global
-    group: str                # used by `include=` to switch items on/off
-    decode: str = "auto"      # auto | number | vector | account | pairs | axon_ip
-    every: int = 1            # fetch every N-th block (forward-filled when merging)
+    name: str  # storage function
+    kind: str  # subnet | mechanism | uid | validator | hotkey | hotkey_net | account | global
+    group: str  # used by `include=` to switch items on/off
+    decode: str = "auto"  # auto | number | vector | account | pairs | axon_ip
+    every: int = 1  # fetch every N-th block (forward-filled when merging)
     module: str = "SubtensorModule"
-    out: str = ""             # field name in the output (default: name)
+    out: str = ""  # field name in the output (default: name)
 
     @property
     def field(self) -> str:
@@ -95,6 +96,7 @@ ALL_GROUPS = sorted({i.group for i in ITEMS})
 
 class StorageFunctions(Enum):
     """For get_subnets_by(metric=...)."""
+
     emission = "Emission"
     dividends = "Dividends"
     active = "Active"
@@ -110,6 +112,7 @@ class BlockInfo:
 
 
 # --------------------------------------------------------------------------- decoding
+
 
 def plain(x: Any) -> Any:
     if x is None or isinstance(x, (bool, int, float, str)):
@@ -151,7 +154,10 @@ def as_account(x: Any) -> Optional[str]:
         x = x[0]
     if isinstance(x, list) and len(x) == 32 and all(isinstance(v, int) for v in x):
         raw = bytes(x)
-        for mod, fn in (("scalecodec.utils.ss58", "ss58_encode"), ("bittensor.utils", "ss58_encode")):
+        for mod, fn in (
+            ("scalecodec.utils.ss58", "ss58_encode"),
+            ("bittensor.utils", "ss58_encode"),
+        ):
             try:
                 return getattr(__import__(mod, fromlist=[fn]), fn)(raw, 42)
             except Exception:
@@ -186,11 +192,14 @@ def decode(value: Any, how: str) -> Any:
         v = v if isinstance(v, list) else ([] if v is None else [v])
         return [as_number(e) for e in v]
     if how == "pairs":
-        return [[int(as_number(p[0])), int(as_number(p[1]))] for p in (plain(value) or [])]
+        return [
+            [int(as_number(p[0])), int(as_number(p[1]))] for p in (plain(value) or [])
+        ]
     return plain(value)
 
 
 # --------------------------------------------------------------------------- snapshot
+
 
 @dataclass
 class BlockSnapshot:
@@ -198,6 +207,7 @@ class BlockSnapshot:
     BlockSnapshot), so `snap.Emission[i]` is subnet netuid[i]'s Emission vector.
     Weights / Bonds are stored sparse: [[src_uid, [[dest_uid, w_u16], ...]], ...];
     use `weights(netuid)` for the square [n_uids, n_uids] array."""
+
     block_info: BlockInfo
     netuid: List[int]
     fields: Dict[str, List[Any]] = field(default_factory=dict)
@@ -221,11 +231,15 @@ class BlockSnapshot:
         inc = (self.fields.get("Incentive") or [[]] * len(self.netuid))[i]
         return len(inc or [])
 
-    def weights(self, netuid: int, normalize: bool = False, name: str = "Weights") -> np.ndarray:
+    def weights(
+        self, netuid: int, normalize: bool = False, name: str = "Weights"
+    ) -> np.ndarray:
         """Square [n_uids, n_uids] array: rows = validator (setting) uid, cols = miner uid."""
         n = self.n_uids(netuid)
         M = np.zeros((n, n), dtype=np.float32 if normalize else np.uint16)
-        rows = (self.fields.get(name) or [None] * len(self.netuid))[self._i(netuid)] or []
+        rows = (self.fields.get(name) or [None] * len(self.netuid))[
+            self._i(netuid)
+        ] or []
         for src, pairs in rows:
             for dest, w in pairs:
                 if src < n and dest < n:
@@ -240,29 +254,51 @@ class BlockSnapshot:
 
     def validator_by_miner(self, netuid: int, normalize: bool = True):
         """(validator uids, [n_validators, n_uids]) rows of the square weight matrix."""
-        vp = (self.fields.get("ValidatorPermit") or [None] * len(self.netuid))[self._i(netuid)]
+        vp = (self.fields.get("ValidatorPermit") or [None] * len(self.netuid))[
+            self._i(netuid)
+        ]
         W = self.weights(netuid, normalize=normalize)
-        v = np.where(np.asarray(vp, dtype=bool))[0] if vp else np.where(W.sum(axis=1) > 0)[0]
+        v = (
+            np.where(np.asarray(vp, dtype=bool))[0]
+            if vp
+            else np.where(W.sum(axis=1) > 0)[0]
+        )
         return v, W[v]
 
     def to_dict(self) -> Dict:
         bi = self.block_info
-        ts = bi.timestamp.isoformat() if isinstance(bi.timestamp, datetime) else bi.timestamp
-        return {"block_info": {"number": int(bi.number), "hash": bi.hash, "timestamp": ts},
-                "netuid": [int(n) for n in self.netuid], **self.fields,
-                "_timings": self.timings, "_errors": self.errors}
+        ts = (
+            bi.timestamp.isoformat()
+            if isinstance(bi.timestamp, datetime)
+            else bi.timestamp
+        )
+        return {
+            "block_info": {"number": int(bi.number), "hash": bi.hash, "timestamp": ts},
+            "netuid": [int(n) for n in self.netuid],
+            **self.fields,
+            "_timings": self.timings,
+            "_errors": self.errors,
+        }
 
     @classmethod
     def from_dict(cls, d: Dict) -> "BlockSnapshot":
         bi = d["block_info"]
         ts = bi.get("timestamp")
-        info = BlockInfo(int(bi["number"]), bi["hash"], datetime.fromisoformat(ts) if ts else None)
+        info = BlockInfo(
+            int(bi["number"]), bi["hash"], datetime.fromisoformat(ts) if ts else None
+        )
         skip = {"block_info", "netuid", "_timings", "_errors"}
-        return cls(info, [int(n) for n in d["netuid"]], {k: v for k, v in d.items() if k not in skip},
-                   d.get("_timings", {}), d.get("_errors", []))
+        return cls(
+            info,
+            [int(n) for n in d["netuid"]],
+            {k: v for k, v in d.items() if k not in skip},
+            d.get("_timings", {}),
+            d.get("_errors", []),
+        )
 
 
 # --------------------------------------------------------------------------- files
+
 
 def block_path(d: str, number: int) -> str:
     return os.path.join(d, f"block_{int(number)}.json.gz")
@@ -287,7 +323,9 @@ def save_block(snap: BlockSnapshot, d: str) -> str:
     return p
 
 
-def load_blocksnapshots(d: str, blocks: Optional[List[int]] = None) -> List[BlockSnapshot]:
+def load_blocksnapshots(
+    d: str, blocks: Optional[List[int]] = None
+) -> List[BlockSnapshot]:
     nums = collected_blocks(d)
     if blocks is not None:
         want = {int(b) for b in blocks}
@@ -301,7 +339,8 @@ def load_blocksnapshots(d: str, blocks: Optional[List[int]] = None) -> List[Bloc
 
 def merge_blocks(d: str, outpath: str, ffill: Optional[List[str]] = None) -> int:
     """Stream all block files into one JSON list (the layout bt_analysis reads).
-    Fields fetched every N-th block are forward-filled from the last block that had them."""
+    Fields fetched every N-th block are forward-filled from the last block that had them.
+    """
     ffill = ffill if ffill is not None else [i.field for i in ITEMS if i.every > 1]
     last: Dict[str, Any] = {}
     nums = collected_blocks(d)
@@ -325,4 +364,7 @@ def merge_blocks(d: str, outpath: str, ffill: Optional[List[str]] = None) -> int
 def load_cache_block_info(bi_path: str) -> List[BlockInfo]:
     with open(bi_path) as f:
         data = json.load(f)
-    return [BlockInfo(e["number"], e["hash"], datetime.fromisoformat(e["timestamp"])) for e in data]
+    return [
+        BlockInfo(e["number"], e["hash"], datetime.fromisoformat(e["timestamp"]))
+        for e in data
+    ]
