@@ -12,7 +12,7 @@ Thumbs.db
 .vscode
 
 # Ignore folders
-data/
+.data/
 exports/
 temp/
 
