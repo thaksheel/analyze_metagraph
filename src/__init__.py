@@ -1,6 +1,6 @@
 from .utils import BlockInfo, BlockSnapshot, StorageFunctions
 from .mg_scaner import MetagraphScanner 
-from .bittensor_temporal_analyzer import BittensorTemporalAnalyzer
+from ..temp.bittensor_temporal_analyzer import BittensorTemporalAnalyzer
 
 
 __all__ = [
