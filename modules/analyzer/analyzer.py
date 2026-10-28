@@ -140,6 +140,7 @@ class Analyzer:
         return [a(self.config) for a in ALL_ANALYSES if a.key in want]
 
     def run_exploits(self, exploit_config: ExploitConfig, save: bool = True) -> Results:
+        t0 = time.time()
         self.config.exploits = exploit_config
         builder = PanelBuilder(self.config)
         results = Results()
@@ -154,7 +155,9 @@ class Analyzer:
             exploit_analyzer.collect(df_objs)
         self.panel = pd.concat(panels, ignore_index=True)
         exploit_analyzer.publish_per_subnet(results)
-        exploit_analyzer.publish(results, exploit_analyzer.aggregate(results, self.panel))
+        exploit_analyzer.publish(
+            results, exploit_analyzer.aggregate(results, self.panel)
+        )
         results.add(
             "panel",
             "snapshots",
@@ -164,7 +167,7 @@ class Analyzer:
         )
         if save:
             results.save(self.config.paths.results_dir)
-            write_report(results, self.config.paths.results_dir, [o for o in objs])
+            write_report(results, self.config.paths.results_dir, [exploit_analyzer])
             self._log(
                 f"saved {len(results.catalog())} tables to {self.config.paths.results_dir} in {time.time() - t0:.0f}s"
             )
@@ -227,3 +230,105 @@ class Analyzer:
     def _log(self, msg: str):
         if self.verbose:
             print(msg, flush=True)
+
+    def exploit_aggregated_report(self, results: Results, save: bool = False):
+        inc = results["exploits_incidents"]
+        n_subnets = len(results["exploits_subnets"])
+        n_snapshots = int(results["panel_snapshots"].groupby("netuid").size().median())
+        for c in ["burn_response", "hyperparam_response", "recovered"]:
+            inc[c] = inc[c].astype(str).str.lower().eq("true")
+        rows = []
+        for col in inc.columns:
+            s = inc[col]
+            if s.dtype == bool:
+                rows.append(
+                    {
+                        "column": col,
+                        "count": len(s),
+                        "true": s.sum(),
+                        "share_true": s.mean(),
+                    }
+                )
+            elif pd.api.types.is_numeric_dtype(s):
+                rows.append(
+                    {
+                        "column": col,
+                        "count": s.notna().sum(),
+                        "sum": s.sum(),
+                        "mean": s.mean(),
+                        "median": s.median(),
+                        "p10": s.quantile(0.1),
+                        "p90": s.quantile(0.9),
+                        "min": s.min(),
+                        "max": s.max(),
+                    }
+                )
+            else:
+                rows.append(
+                    {
+                        "column": col,
+                        "count": s.notna().sum(),
+                        "distinct": s.nunique(),
+                        "most_common": s.mode().iloc[0] if s.notna().any() else None,
+                    }
+                )
+        columns = pd.DataFrame(rows)
+        per_subnet = inc.groupby("netuid").size()
+        days_between = (
+            inc.sort_values("hours")
+            .groupby("netuid")["hours"]
+            .apply(lambda h: (h.diff() / 24).median())
+        )
+        response = pd.Series("no response", index=inc.index)
+        response[inc.burn_response & ~inc.hyperparam_response] = "burn only"
+        response[~inc.burn_response & inc.hyperparam_response] = "settings only"
+        response[inc.burn_response & inc.hyperparam_response] = "burn + settings"
+        response_share = response.value_counts(normalize=True)
+
+        headline = pd.DataFrame(
+            [
+                ("subnets analyzed", n_subnets),
+                (
+                    "share of subnets with repeated incidents (2+)",
+                    (per_subnet >= 2).sum() / n_subnets,
+                ),
+                ("incidents", len(inc)),
+                ("snapshots", n_snapshots),
+                (
+                    "share of subnets with at least one incident",
+                    (per_subnet >= 1).sum() / n_subnets,
+                ),
+                ("median days between incidents in a subnet", days_between.median()),
+                (
+                    "median share of miners in the gaining group",
+                    inc.cohort_uid_share.median(),
+                ),
+                ("median miners in the gaining group", inc.cohort_size.median()),
+                (
+                    "median miners in the subnet",
+                    (inc.cohort_size / inc.cohort_uid_share).median(),
+                ),
+                (
+                    "median share of newly registered miners in the group",
+                    inc.cohort_new_frac.median(),
+                ),
+                (
+                    "share of incidents with any newly registered miner",
+                    (inc.cohort_new_frac > 0).mean(),
+                ),
+                ("response: burn only", response_share.get("burn only", 0)),
+                ("response: settings only", response_share.get("settings only", 0)),
+                ("response: burn + settings", response_share.get("burn + settings", 0)),
+                ("response: none", response_share.get("no response", 0)),
+                ("median hours until owner responds", inc.response_hours.median()),
+                ("median hours until the shift unwound", inc.recovery_hours.median()),
+                ("share of shifts that never unwound", 1 - inc.recovered.mean()),
+                ("total TAO at risk", inc.at_risk_tao.sum()),
+            ],
+            columns=["insight", "value"],
+        )
+        if save: 
+            with pd.ExcelWriter("./exports/output.xlsx", engine="openpyxl") as writer:
+                columns.to_excel(writer, sheet_name="features", index=False)
+                headline.to_excel(writer, sheet_name="summ", index=False)
+        return columns, headline
