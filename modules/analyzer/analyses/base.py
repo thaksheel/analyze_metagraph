@@ -11,6 +11,7 @@ and implements per_subnet() (called once per subnet with that subnet's data) and
 aggregate() (called once with all results so far). Outputs of per_subnet() are
 concatenated across subnets automatically.
 """
+
 from collections import defaultdict
 from typing import Dict, Tuple
 
@@ -43,7 +44,9 @@ class Analysis:
     def per_subnet(self, sn, panel: pd.DataFrame, ctx: Dict) -> Dict[str, pd.DataFrame]:
         return {}
 
-    def aggregate(self, results: Results, panel: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+    def aggregate(
+        self, results: Results, panel: pd.DataFrame
+    ) -> Dict[str, pd.DataFrame]:
         return {}
 
     # ---- plumbing
@@ -62,10 +65,21 @@ class Analysis:
             results.add(self.key, short, df, q, desc)
 
     def publish_per_subnet(self, results: Results):
-        self.publish(results, {k: self.combined(k) for k in self._parts if not k.startswith("_")})
+        self.publish(
+            results, {k: self.combined(k) for k in self._parts if not k.startswith("_")}
+        )
 
     @classmethod
     def describe(cls) -> pd.DataFrame:
-        rows = [{"analysis": cls.key, "question": q, "text": t, "tables": ", ".join(
-            s for s, (qq, _) in cls.tables.items() if covers(qq, q))} for q, t in cls.questions.items()]
+        rows = [
+            {
+                "analysis": cls.key,
+                "question": q,
+                "text": t,
+                "tables": ", ".join(
+                    s for s, (qq, _) in cls.tables.items() if covers(qq, q)
+                ),
+            }
+            for q, t in cls.questions.items()
+        ]
         return pd.DataFrame(rows)

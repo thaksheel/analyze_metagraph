@@ -1,14 +1,6 @@
-"""Results: every output table, reachable by analysis and searchable.
-
-    res.exploits.incidents          # table by analysis + short name
-    res["exploits_incidents"]       # same, by full name (= CSV file name)
-    res.catalog()                   # all tables with their question and description
-    res.search("churn")             # tables whose name, description or columns mention "churn"
-    res.exploits                    # lists that analysis's tables
-"""
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any 
 
 import pandas as pd
 
@@ -53,6 +45,7 @@ class Results:
     def __init__(self):
         self._tables: Dict[str, pd.DataFrame] = {}
         self._info: Dict[str, TableInfo] = {}
+        self.meta: Dict[str, Any] = {}
 
     def add(self, analysis: str, short: str, df: pd.DataFrame, question: str = "", description: str = ""):
         name = f"{analysis}_{short}"

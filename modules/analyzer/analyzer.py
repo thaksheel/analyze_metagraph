@@ -1,20 +1,5 @@
-"""Analyzer: the one entry point.
-
-from bt_analysis import Analyzer
-az = Analyzer("./exports/blocks/")
-res = az.run()                          # everything; or az.run(["exploits", "sybil"])
-res.ranking.problems                    # ranked problems
-res.sybil.tracks                        # any table: res.<analysis>.<table>
-az.questions()                          # every question and the tables that answer it
-az.find("churn")                        # search questions, tables, columns and settings
-az.subnet(20)                           # raw + derived arrays for one subnet
-az.cfg.sybil.edge_min = 0.7; az.run(["sybil"])   # tweak and rerun one analysis
-"""
-
-import os
-import time
+import os, time
 from typing import Dict, List, Optional
-
 import numpy as np
 import pandas as pd
 
@@ -26,6 +11,8 @@ from .data.subnet import Subnet
 from .ranking import Ranking
 from .report import write_report
 from .results import Results
+from .analyses import ExploitAnalysis, Analysis
+from .config import ExploitConfig, Config
 
 DEPENDS = {
     "telemetry": ["exploits", "sybil"],
@@ -38,16 +25,16 @@ class Analyzer:
     def __init__(
         self,
         blocks: Optional[str] = None,
-        cfg: Optional[Config] = None,
+        config: Optional[Config] = None,
         out_dir: Optional[str] = None,
         verbose: bool = True,
     ):
-        self.cfg = cfg or Config()
+        self.config = config or Config()
         if blocks:
-            self.cfg.paths.blocks = blocks
+            self.config.paths.blocks = blocks
         if out_dir:
-            self.cfg.paths.cache_dir = os.path.join(out_dir, "cache")
-            self.cfg.paths.results_dir = os.path.join(out_dir, "results")
+            self.config.paths.cache_dir = os.path.join(out_dir, "cache")
+            self.config.paths.results_dir = os.path.join(out_dir, "results")
         self.verbose = verbose
         self._ds: Optional[Dataset] = None
         self.results: Optional[Results] = None
@@ -57,7 +44,7 @@ class Analyzer:
     @property
     def dataset(self) -> Dataset:
         if self._ds is None:
-            self._ds = Dataset(self.cfg, verbose=self.verbose)
+            self._ds = Dataset(self.config, verbose=self.verbose)
         return self._ds
 
     def subnet(self, netuid: int) -> Subnet:
@@ -66,7 +53,7 @@ class Analyzer:
     def subnet_panel(self, netuid: int) -> pd.DataFrame:
         if self.panel is not None:
             return self.panel[self.panel.netuid == netuid]
-        return PanelBuilder(self.cfg).build(self.subnet(netuid))[0]
+        return PanelBuilder(self.config).build(self.subnet(netuid))[0]
 
     # ---------------------------------------------------------------- discovery
     @staticmethod
@@ -105,10 +92,10 @@ class Analyzer:
         ]
         res = self.results
         if res is None and os.path.exists(
-            os.path.join(self.cfg.paths.results_dir, "_catalog.csv")
+            os.path.join(self.config.paths.results_dir, "_catalog.csv")
         ):
             res = self.results = Results.load(
-                self.cfg.paths.results_dir
+                self.config.paths.results_dir
             )  # earlier run on disk
         if res is not None:
             r = res.search(term)
@@ -125,7 +112,7 @@ class Analyzer:
                 if t in f"{s} {d}".lower()
             ]
             out.append(pd.DataFrame(rows, columns=["kind", "where", "text"]))
-        c = self.cfg.search(term)
+        c = self.config.search(term)
         out.append(
             pd.DataFrame(
                 {
@@ -138,7 +125,7 @@ class Analyzer:
         return pd.concat(out, ignore_index=True)
 
     # ---------------------------------------------------------------- run
-    def _resolve(self, keys: Optional[List[str]]) -> List:
+    def _collect_analyzers(self, keys: Optional[List[str]]) -> List[Analysis]:
         if keys is None:
             return list(ALL_ANALYSES)
         want = {"checks"}
@@ -150,59 +137,92 @@ class Analyzer:
             if k not in want:
                 want.add(k)
                 stack += DEPENDS.get(k, [])
-        return [a for a in ALL_ANALYSES if a.key in want]
+        return [a(self.config) for a in ALL_ANALYSES if a.key in want]
 
-    def run(self, analyses: Optional[List[str]] = None, save: bool = True) -> Results:
-        t0 = time.time()
-        ds = self.dataset
-        classes = self._resolve(analyses)
-        objs = [cls(self.cfg) for cls in classes]
-        res = Results()
-        res.meta = ds.meta
-        builder = PanelBuilder(self.cfg)
+    def run_exploits(self, exploit_config: ExploitConfig, save: bool = True) -> Results:
+        self.config.exploits = exploit_config
+        builder = PanelBuilder(self.config)
+        results = Results()
+        results.meta = self.dataset.meta
+        exploit_analyzer = ExploitAnalysis(self.config)
         panels = []
-        self._log(f"running {[o.key for o in objs]} on {len(ds)} subnets")
-        for i, sn in enumerate(ds):
+        for i, sn in enumerate(self.dataset):
             panel, flags = builder.build(sn)
             panels.append(panel)
-            ctx: Dict = {"flags": flags}
-            for o in objs:
-                out = o.per_subnet(sn, panel, ctx)
-                o.collect(out)
-                if o.key == "sybil":
-                    ctx["sybil_members"] = out.get("members", pd.DataFrame())
-                if o.key == "rewards" and len(out.get("subnets", [])):
-                    ctx["mechanism_type"] = out["subnets"]["mechanism_type"].iloc[0]
-            self._log(f"  [{i + 1}/{len(ds)}] netuid {sn.netuid}")
+            context: Dict = {"flags": flags}
+            df_objs = exploit_analyzer.per_subnet(sn, panel, context)
+            exploit_analyzer.collect(df_objs)
         self.panel = pd.concat(panels, ignore_index=True)
-        res.add(
+        exploit_analyzer.publish_per_subnet(results)
+        exploit_analyzer.publish(results, exploit_analyzer.aggregate(results, self.panel))
+        results.add(
             "panel",
             "snapshots",
             self.panel,
             "",
             "one row per subnet and snapshot: every derived metric",
         )
-        for o in objs:
-            o.publish_per_subnet(res)
-            o.publish(res, o.aggregate(res, self.panel))
-            self._log(f"  aggregated {o.key}")
-        if all(p in classes for p in PROBLEM_ANALYSES):
-            probs = [o for o in objs if type(o) in PROBLEM_ANALYSES]
-            res.add(
+        if save:
+            results.save(self.config.paths.results_dir)
+            write_report(results, self.config.paths.results_dir, [o for o in objs])
+            self._log(
+                f"saved {len(results.catalog())} tables to {self.config.paths.results_dir} in {time.time() - t0:.0f}s"
+            )
+        return results
+
+    def run_all(
+        self, analyzers_names: Optional[List[str]] = None, save: bool = True
+    ) -> Results:
+        t0 = time.time()
+        analyzers = self._collect_analyzers(analyzers_names)
+        results = Results()
+        results.meta = self.dataset.meta
+        builder = PanelBuilder(self.config)
+        panels = []
+        self._log(
+            f"running {[o.key for o in analyzers]} on {len(self.dataset)} subnets"
+        )
+        for i, sn in enumerate(self.dataset):
+            panel, flags = builder.build(sn)
+            panels.append(panel)
+            ctx: Dict = {"flags": flags}
+            for analyzer in analyzers:
+                out = analyzer.per_subnet(sn, panel, ctx)
+                analyzer.collect(out)
+                if analyzer.key == "sybil":
+                    ctx["sybil_members"] = out.get("members", pd.DataFrame())
+                if analyzer.key == "rewards" and len(out.get("subnets", [])):
+                    ctx["mechanism_type"] = out["subnets"]["mechanism_type"].iloc[0]
+            self._log(f"  [{i + 1}/{len(self.dataset)}] netuid {sn.netuid}")
+        self.panel = pd.concat(panels, ignore_index=True)
+        results.add(
+            "panel",
+            "snapshots",
+            self.panel,
+            "",
+            "one row per subnet and snapshot: every derived metric",
+        )
+        for analyzer in analyzers:
+            analyzer.publish_per_subnet(results)
+            analyzer.publish(results, analyzer.aggregate(results, self.panel))
+            self._log(f"  aggregated {analyzer.key}")
+        if all(p in analyzers for p in PROBLEM_ANALYSES):
+            probs = [o for o in analyzers if type(o) in PROBLEM_ANALYSES]
+            results.add(
                 "ranking",
                 "problems",
-                Ranking(self.cfg).build(res, probs),
+                Ranking(self.config).build(results, probs),
                 "",
                 "the five problems ranked by size x impact",
             )
-        self.results = res
+        self.results = results
         if save:
-            res.save(self.cfg.paths.results_dir)
-            write_report(res, self.cfg.paths.results_dir, [o for o in objs])
+            results.save(self.config.paths.results_dir)
+            write_report(results, self.config.paths.results_dir, [o for o in analyzers])
             self._log(
-                f"saved {len(res.catalog())} tables to {self.cfg.paths.results_dir} in {time.time() - t0:.0f}s"
+                f"saved {len(results.catalog())} tables to {self.config.paths.results_dir} in {time.time() - t0:.0f}s"
             )
-        return res
+        return results
 
     def _log(self, msg: str):
         if self.verbose:
