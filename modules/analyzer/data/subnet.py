@@ -4,20 +4,19 @@ Raw arrays ([T] per block or [T, N] per block and uid) are attributes named as i
 loader.VECTOR_FIELDS / SCALAR_FIELDS (incentive, emission, consensus, stake_weight,
 reg_block, tempo, subnet_tao, ...). Derived quantities are cached properties:
 
-  time        T, N, blocks, hours, snaps(days)
-  masks       exists, is_validator, is_miner
-  shares      inc_share, emi_share, div_share, miner_emi_share
-  value       price (TAO per alpha), alpha_flow, tao_flow, subnet_tao_flow
-  weights     W [T, K, N] row-normalized, weights_rows, active_validator_rows(t),
-              validator_weight(t, uids)  (StakeWeight, falling back to ValidatorTrust)
-  identity    replaced, occupant, owner_uid
-  support     median / mean validator support, breadth, CV, consensus share per miner
+    time        T, N, blocks, hours, snaps(days)
+    masks       exists, is_validator, is_miner
+    shares      inc_share, emi_share, div_share, miner_emi_share
+    value       price (TAO per alpha), alpha_flow, tao_flow, subnet_tao_flow
+    weights     W [T, K, N] row-normalized, weights_rows, active_validator_rows(t),
+                validator_weight(t, uids)  (StakeWeight, falling back to ValidatorTrust)
+    identity    replaced, occupant, owner_uid
+    support     median / mean validator support, breadth, CV, consensus share per miner
 """
 import os
 from dataclasses import dataclass
 from functools import cached_property
 from typing import Optional, Tuple
-
 import numpy as np
 
 from ..config import RAO, SECONDS_PER_BLOCK
@@ -43,7 +42,9 @@ class Support:
 
 
 class Subnet:
-    def __init__(self, netuid: int, path: str):
+    def __init__(self, netuid: int, path: str, miner_definition: str = "working", working_min_share: float =0.001):
+        self.miner_definition = miner_definition
+        self.working_min_share = working_min_share
         self.netuid = netuid
         with np.load(path, allow_pickle=False) as z:
             self._z = {k: z[k] for k in z.files}
@@ -97,8 +98,27 @@ class Subnet:
         return np.nan_to_num(self.vpermit) > 0
 
     @cached_property
-    def is_miner(self) -> np.ndarray:
+    def is_registered_miner(self) -> np.ndarray:
+        """Every existing uid without a validator permit (the old definition)."""
         return self.exists & ~self.is_validator
+
+    @cached_property
+    def is_miner(self) -> np.ndarray:
+        """Working miners: registered, not the owner uid, and >= working_min_share of miner rewards."""
+        reg = self.is_registered_miner
+        if self.miner_definition == "registered":
+            return reg
+        share = row_share(
+            np.where(reg, np.nan_to_num(self.incentive), 0.0)
+        )  # share among registered miners
+        working = reg & (share >= self.working_min_share)
+        if (
+            self.has_hotkeys and (self.owner_hotkey != "").any()
+        ):  # the owner uid is not a miner
+            rows = np.arange(self.T)
+            is_owner = self.hotkeys[rows, self.owner_uid] == self.owner_hotkey
+            working[rows[is_owner], self.owner_uid[is_owner]] = False
+        return working
 
     # ---------------------------------------------------------------- shares
     @cached_property

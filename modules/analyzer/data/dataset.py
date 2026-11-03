@@ -1,10 +1,11 @@
 """Dataset: all subnets of one collection.
 
-    ds = Dataset(cfg)            # builds the cache on first use
-    ds.netuids                   # subnets in the data
-    sn = ds[20]                  # Subnet for netuid 20
-    for sn in ds: ...            # iterate (one subnet in memory at a time)
+ds = Dataset(cfg)            # builds the cache on first use
+ds.netuids                   # subnets in the data
+sn = ds[20]                  # Subnet for netuid 20
+for sn in ds: ...            # iterate (one subnet in memory at a time)
 """
+
 import json
 import os
 from typing import Iterator, List
@@ -27,7 +28,13 @@ class Dataset:
     def __getitem__(self, netuid: int) -> Subnet:
         if netuid not in self.netuids:
             raise KeyError(f"netuid {netuid} not in data; available: {self.netuids}")
-        return Subnet(netuid, os.path.join(self.cfg.paths.cache_dir, f"subnet_{netuid}.npz"))
+        g = self.cfg.general
+        return Subnet(
+            netuid,
+            os.path.join(self.cfg.paths.cache_dir, f"subnet_{netuid}.npz"),
+            g.miner_definition,
+            g.working_min_share,
+        )
 
     def __iter__(self) -> Iterator[Subnet]:
         for n in self.netuids:

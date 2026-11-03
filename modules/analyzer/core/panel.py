@@ -115,6 +115,7 @@ class PanelBuilder:
                 "hours": sn.hours[t],
                 "n_uids": int(sn.exists[t].sum()),
                 "n_miners": int(miners.sum()),
+                "n_registered_miners": int(sn.is_registered_miner[t].sum()),
             }
             r["gini_inc"] = gini(inc_m[miners]) if miners.any() else np.nan
             r["top10_share"] = top_k_share(sn.emission[t][sn.exists[t]])
@@ -173,7 +174,9 @@ class PanelBuilder:
                 )
                 contested[t] = cmask
                 received[t, miners] = mean
-                r["contested_share"] = float(cmask[miners].mean())
+                r["contested_share"] = (
+                    float(cmask[miners].mean()) if miners.any() else np.nan
+                )
                 r["contested_emission_share"] = float(
                     sn.miner_emi_share[t][cmask].sum()
                 )

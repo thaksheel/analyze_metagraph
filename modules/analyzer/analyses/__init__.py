@@ -9,6 +9,7 @@ from .scoring import ScoringAnalysis
 from .sufficiency import SufficiencyAnalysis
 from .sybil import SybilAnalysis
 from .telemetry import TelemetryAnalysis
+from .mechanism_groups import classify_subnets
 
 # order matters: later analyses read earlier results
 ALL_ANALYSES = [

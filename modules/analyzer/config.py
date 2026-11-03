@@ -47,6 +47,8 @@ class GeneralConfig:
     """
 
     min_miner_share_factor: float = 0.1
+    miner_definition: str = "working"
+    working_min_share = 0.001
 
 
 @dataclass
@@ -87,6 +89,7 @@ class ExploitConfig:
     recovery_unwind: float = 0.75
     recovery_consecutive: int = 3
     burn_rise_threshold: float = 0.05
+    min_working_miners: int = 3
 
 
 @dataclass
