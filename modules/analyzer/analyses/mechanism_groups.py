@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from ..data.subnet import row_share
+from modules.analyzer.data.subnet import row_share
 
 
 def working_mask(sn, min_share=0.001):
